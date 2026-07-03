@@ -1,0 +1,68 @@
+# ---------------------------------------------------------------------------
+# General configuration for the OCR pipeline.
+# Any value omitted here falls back to the defaults defined in src/config.py.
+# CLI arguments (main.py) override values in this file.
+# Relative paths are resolved against the project root.
+# ---------------------------------------------------------------------------
+
+# --- Paths ---
+input_root: "inputs/checking"
+output_root: "output"
+logs_root: "logs"
+misc_root: "misc"
+extracted_subdir: "extracted"   # -> misc/extracted/
+converted_subdir: "converted"   # -> misc/converted/
+
+# --- Selective execution ---
+# target_folder: null  -> process according to process_all_folders
+# target_folder: "PIxxxx" -> process only that subfolder of inputs/checking
+target_folder: null
+process_all_folders: true
+
+# --- Skip / overwrite behaviour (mutually exclusive) ---
+skip_existing: true
+overwrite_existing: false
+
+# --- Device ---
+use_gpu: true
+device: "gpu:0"        # "gpu:0", "gpu", or "cpu". null -> derived from use_gpu.
+
+# --- Logging ---
+log_level: "INFO"      # DEBUG | INFO | WARNING | ERROR | CRITICAL
+log_to_console: true
+
+# NÃO passar para PPStructureV3
+return_word_box: true
+
+# --- Extensions ---
+accepted_extensions:
+  - ".png"
+  - ".jpg"
+  - ".jpeg"
+  - ".pdf"
+  - ".doc"
+  - ".docx"
+  - ".odt"
+
+# Formats converted to PDF before OCR (subset of accepted_extensions).
+document_convert_extensions:
+  - ".doc"
+  - ".docx"
+  - ".odt"
+
+# --- PaddleOCR pipeline ---
+paddleocr:
+  pipeline: "PPStructureV3"   # PPStructureV3 (layout analysis) | PaddleOCRVL
+  lang: null                  # null -> PaddleOCR default
+  ocr_version: null
+  use_doc_orientation_classify: true
+  use_doc_unwarping: false
+  use_textline_orientation: true
+  use_table_recognition: true
+  use_formula_recognition: true
+  use_seal_recognition: true
+  use_chart_recognition: false
+  use_region_detection: null
+  enable_hpi: false
+  cpu_threads: 8
+  # extra: {}   # any additional PaddleOCR kwargs (model names/dirs/thresholds)

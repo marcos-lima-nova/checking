@@ -1,0 +1,36 @@
+# ---------------------------------------------------------------------------
+# Test configuration: process ONLY a single subfolder of inputs/checking.
+# Useful to iterate quickly during development without processing everything.
+#
+# Run with:  python main.py --config config/test_config.yaml
+# ---------------------------------------------------------------------------
+
+input_root: "inputs/checking"
+output_root: "output"
+logs_root: "logs"
+misc_root: "misc"
+
+# Only this folder is processed. Change it to any subfolder under inputs/checking.
+target_folder: "PI 292174"
+process_all_folders: false
+
+skip_existing: true
+overwrite_existing: false
+
+use_gpu: true
+device: "gpu:0"
+
+log_level: "INFO"
+log_to_console: true
+
+accepted_extensions:
+  - ".png"
+  - ".jpg"
+  - ".jpeg"
+  - ".pdf"
+  - ".doc"
+  - ".docx"
+  - ".odt"
+
+paddleocr:
+  pipeline: "PPStructureV3"

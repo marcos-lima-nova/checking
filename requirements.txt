@@ -1,0 +1,19 @@
+# Python dependencies for the OCR pipeline.
+# Pinned to the versions verified in the development environment.
+
+paddleocr==3.7.0
+
+# PaddlePaddle backend.
+#  - GPU (CUDA):  paddlepaddle-gpu==3.3.0   (used in dev, RTX 3060)
+#  - CPU only:    paddlepaddle==3.3.0
+# Install ONE of the two depending on the target machine.
+paddlepaddle-gpu==3.3.0
+
+PyYAML>=6.0
+
+# ---------------------------------------------------------------------------
+# System dependency (NOT installable via pip):
+#   LibreOffice (provides `soffice`) is required to convert
+#   .doc / .docx / .odt to PDF before OCR.
+#     Debian/Ubuntu/Pop!_OS:  sudo apt install libreoffice
+# ---------------------------------------------------------------------------
