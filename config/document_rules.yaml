@@ -1,0 +1,175 @@
+# ---------------------------------------------------------------------------
+# Document classification rules for the post-OCR segmentation stage (Option B).
+#
+# The classifier (src/page_classifier.py) loads this file via
+# src/document_rules.py. NOTHING here is hard-coded in Python: adjust terms and
+# thresholds freely without touching code.
+#
+# Scoring (v1): for each document type, each matched strong_term adds
+# `strong_weight` points and each matched weak_term adds `weak_weight` points.
+# confidence = points_scored / max_possible_points_for_that_type.
+# Terms are matched after normalization (uppercase, accent-free, punctuation
+# collapsed), so entries below are written without accents on purpose.
+# ---------------------------------------------------------------------------
+
+# Relative weights for term categories (used to compute the max/achieved score).
+weights:
+  strong: 2.0
+  weak: 1.0
+
+thresholds:
+  # >= classified            -> status "classified"
+  # >= needs_review          -> status "needs_review" (still produced)
+  # <  unknown_below         -> status "unknown"
+  classified: 0.75
+  needs_review: 0.45
+  unknown_below: 0.45
+  # Minimum own-confidence for a low-scoring page to be eligible as a
+  # continuation of the previous document.
+  continuation_min_confidence: 0.35
+
+document_types:
+  nota_fiscal:
+    label: "Nota fiscal"
+    strong_terms:
+      - "NOTA FISCAL"
+      - "NOTA FISCAL ELETRONICA DE SERVICOS"
+      - "NOTA FISCAL DE SERVICOS ELETRONICA"
+      - "NOTA FISCAL DE SERVICOS DE COMUNICACAO"
+      - "FATURA DE SERVICOS"
+      - "FATURA DE SERVICOS DE COMUNICACAO"
+      - "MODELO 21"
+      - "NFS E"
+      - "DATA DA EMISSAO"
+      - "DATA E HORA DE EMISSAO"
+      - "SERIE"
+      - "NUMERO"
+      - "NUMERO DA NOTA"
+      - "CNPJ"
+      - "VENCIMENTO"
+      - "VALOR"
+      - "VALOR TOTAL DO SERVICO"
+      - "VALOR TOTAL DA PRESTACAO"
+    weak_terms:
+      - "NFS"
+      - "DADOS DA FATURA"
+      - "PRESTADOR DE SERVICOS"
+      - "TOMADOR DE SERVICOS"
+      - "DISCRIMINACAO DE SERVICOS"
+      - "DESCRICAO DOS SERVICOS"
+      - "SERVICO PRESTADO"
+      - "VALOR POR EXTENSO"
+      - "CODIGO DO SERVICO"
+      - "CODIGO DA ATIVIDADE PRESTADA"
+      - "RESERVADO AO FISCO"
+      - "INSCRICAO ESTADUAL"
+      - "INSCR MUNIC"
+      - "SACADO"
+      - "PRESTACAO DE SERVICO"
+
+  pedido_insercao:
+    label: "PI - Pedido de insercao"
+    strong_terms:
+      - "PEDIDO DE INSERCAO"
+      - "PI PEDIDO DE INSERCAO"
+      - "PI PEDIDO DE INSERCAO TV PAGA"
+      - "PI PEDIDO DE INSERCAO RADIO"
+      - "PI PEDIDO DE INSERCAO TV ABERTA"
+      - "P I"
+      - "PI"
+      - "NUMERO DO PI"
+      - "CAMPANHA"
+      - "CLIENTE"
+      - "AGENCIA"
+      - "VEICULO"
+      - "PERIODO"
+      - "INSERCOES"
+      - "VALOR"
+    weak_terms:
+      - "CHECKING"
+      - "COMERCIAIS VEICULADOS NO PERIODO"
+      - "COMERCIAIS EXIBIDOS CONFORME PI"
+      - "COMERCIAIS PROGRAMADOS NO PI POREM NAO EXIBIDOS"
+      - "PRACAS FISCALIZADAS"
+      - "FORMATO DA S PECA S"
+      - "FORMATO DAS PECAS"
+      - "TITULO S DA S PECA S"
+      - "TITULOS DAS PECAS"
+      - "PRACA"
+      - "FORMATO"
+      - "MIDIA"
+      - "TABELA"
+      - "DESCONTO"
+
+  autorizacao_veiculacao:
+    label: "AV - Autorizacao de veiculacao"
+    strong_terms:
+      - "AUTORIZACAO DE VEICULACAO"
+      - "AV AUTORIZACAO DE VEICULACAO"
+      - "AUTORIZAMOS"
+      - "AV"
+      - "VEICULACAO"
+      - "VEICULO"
+      - "CAMPANHA"
+      - "CLIENTE"
+      - "PERIODO"
+      - "INSERCOES"
+    weak_terms:
+      - "MIDIA"
+      - "PRACA"
+      - "PROGRAMACAO"
+      - "VALOR"
+
+  comprovante_veiculacao:
+    label: "Comprovante de veiculacao"
+    strong_terms:
+      - "COMPROVANTE DE VEICULACAO"
+      - "COMPROVANTE DE EXIBICAO"
+      - "COMPROVANTE DE IRRADIACAO"
+      - "RELATORIO DE VEICULACAO"
+      - "MAPA DE VEICULACAO"
+      - "LISTA DE EXIBICOES"
+      - "INSERCOES NO PERIODO"
+      - "VEICULACAO"
+      - "INSERCOES"
+      - "EXIBICOES"
+      - "PROGRAMA"
+      - "EMISSORA"
+      - "CANAL"
+      - "HORARIO"
+    weak_terms:
+      - "DATA"
+      - "PERIODO"
+      - "PRACA"
+      - "CLIENTE"
+      - "CAMPANHA"
+
+  artigo_299:
+    label: "Artigo 299"
+    # For artigo_299 the classification must not rely on a title alone: typical
+    # declaratory phrases below carry strong weight.
+    strong_terms:
+      - "ARTIGO 299"
+      - "ART 299"
+      - "CODIGO PENAL"
+      - "PENAS DA LEI"
+      - "DECLARO"
+      - "DECLARAMOS"
+      - "REALIZAMOS A VEICULACAO"
+      - "REALIZOU A VEICULACAO"
+      - "CONFORME O PI"
+      - "CONFORME PI"
+      - "SOB AS PENAS DA LEI"
+      - "DECLARO SOB AS PENAS DA LEI"
+      - "DECLARAMOS SOB AS PENAS DA LEI"
+      - "ARTIGO 299 DO CODIGO PENAL"
+      - "ART 299 DO CODIGO PENAL"
+      - "FALSIDADE IDEOLOGICA"
+      - "REALIZAMOS A VEICULACAO CONFORME O PI"
+      - "VEICULACAO CONFORME PI"
+    weak_terms:
+      - "DECLARACAO"
+      - "VERACIDADE"
+      - "RESPONSABILIDADE"
+      - "INFORMACOES PRESTADAS"
+      - "VEICULACAO CONFORME"

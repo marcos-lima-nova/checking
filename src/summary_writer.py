@@ -44,8 +44,13 @@ class FileRecord:
     file_name: str = ""
     file_extension: str = ""
     output_folder: Optional[str] = None
+    raw_output_folder: Optional[str] = None
     status: str = FILE_PROCESSED
     error: Optional[str] = None
+    # Post-OCR logical-document segmentation (Option B).
+    segmentation_status: Optional[str] = None  # ok | failed | skipped
+    segmentation_error: Optional[str] = None
+    documents_detected: List[dict] = field(default_factory=list)
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
     duration_seconds: float = 0.0

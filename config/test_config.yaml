@@ -17,6 +17,9 @@ process_all_folders: false
 skip_existing: true
 overwrite_existing: false
 
+enable_segmentation: true
+document_rules_path: "config/document_rules.yaml"
+
 use_gpu: true
 device: "gpu:0"
 

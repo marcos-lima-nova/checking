@@ -21,6 +21,8 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
+from .utils.path_utils import raw_folder_name
+
 
 def _sanitize_component(name: str) -> str:
     name = name.strip()
@@ -83,6 +85,19 @@ class OutputManager:
 
         self._assigned.add(str(candidate))
         return candidate
+
+    def raw_output_dir(self, output_dir: Path) -> Path:
+        """Return the ``raw_<stem>`` subfolder inside a per-file output dir.
+
+        The raw folder name is derived from the (already-sanitized) output dir
+        name so it matches the file stem, and is itself sanitized.
+        """
+        output_dir = Path(output_dir)
+        return output_dir / raw_folder_name(output_dir.name)
+
+    def documents_dir(self, output_dir: Path) -> Path:
+        """Return the ``documents`` subfolder inside a per-file output dir."""
+        return Path(output_dir) / "documents"
 
     def should_process(self, output_dir: Path) -> bool:
         """Decide whether to process, honoring skip/overwrite.

@@ -22,6 +22,7 @@ from pathlib import Path
 
 from src.config import apply_overrides, load_config
 from src.document_converter import DocumentConverter
+from src.document_rules import load_document_rules
 from src.exceptions import ConfigError, OcrPipelineError, TargetFolderNotFound
 from src.file_scanner import list_target_subfolders
 from src.ocr_runner import OcrRunner
@@ -148,11 +149,27 @@ def main(argv=None) -> int:
             "LibreOffice not available: .doc/.docx/.odt conversion will fail per-file."
         )
 
+    # Load document classification rules once (Option B segmentation).
+    document_rules = None
+    if config.enable_segmentation:
+        try:
+            document_rules = load_document_rules(config.document_rules_path_resolved)
+            boot_logger.info(
+                "Loaded document rules from %s (%d type(s))",
+                config.document_rules_path_resolved,
+                len(document_rules.types),
+            )
+        except ConfigError as exc:
+            print(f"[config error] {exc}", file=sys.stderr)
+            return 2
+
     # 4) Process each folder (failures isolated per folder/file).
     exit_code = 0
     for folder in folders:
         try:
-            summary = process_folder(folder, config, ocr_runner, converter)
+            summary = process_folder(
+                folder, config, ocr_runner, converter, document_rules
+            )
             if summary.total_files_failed:
                 exit_code = 1
         except OcrPipelineError as exc:

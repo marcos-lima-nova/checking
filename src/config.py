@@ -93,6 +93,10 @@ class AppConfig:
     skip_existing: bool = True
     overwrite_existing: bool = False
 
+    # --- Post-OCR logical-document segmentation (Option B) ---
+    enable_segmentation: bool = True
+    document_rules_path: str = "config/document_rules.yaml"
+
     # --- Device ---
     use_gpu: bool = True
     device: Optional[str] = None  # e.g. "gpu:0" or "cpu"; None -> derived from use_gpu
@@ -157,6 +161,10 @@ class AppConfig:
     def converted_root_path(self) -> Path:
         return self.misc_root_path / self.converted_subdir
 
+    @property
+    def document_rules_path_resolved(self) -> Path:
+        return self._abs(self.document_rules_path)
+
     def normalized_accepted_extensions(self) -> List[str]:
         return [e.lower() for e in self.accepted_extensions]
 
@@ -207,6 +215,11 @@ class AppConfig:
         if not self.target_folder and not self.process_all_folders:
             raise ConfigError(
                 "No work to do: target_folder is empty and process_all_folders is False"
+            )
+
+        if self.enable_segmentation and not self.document_rules_path_resolved.exists():
+            raise ConfigError(
+                f"document_rules_path does not exist: {self.document_rules_path_resolved}"
             )
 
 

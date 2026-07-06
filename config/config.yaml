@@ -23,6 +23,10 @@ process_all_folders: true
 skip_existing: true
 overwrite_existing: false
 
+# --- Post-OCR logical-document segmentation (Option B) ---
+enable_segmentation: true
+document_rules_path: "config/document_rules.yaml"
+
 # --- Device ---
 use_gpu: true
 device: "gpu:0"        # "gpu:0", "gpu", or "cpu". null -> derived from use_gpu.
@@ -31,8 +35,6 @@ device: "gpu:0"        # "gpu:0", "gpu", or "cpu". null -> derived from use_gpu.
 log_level: "INFO"      # DEBUG | INFO | WARNING | ERROR | CRITICAL
 log_to_console: true
 
-# NÃO passar para PPStructureV3
-return_word_box: true
 
 # --- Extensions ---
 accepted_extensions:

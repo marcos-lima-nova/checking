@@ -21,12 +21,14 @@ from typing import List, Optional
 
 from .config import AppConfig
 from .document_converter import DocumentConverter
+from .document_rules import DocumentRules
 from .exceptions import ConversionError, ExtractionError
 from .file_scanner import ScanResult, classify_extracted_files, scan_folder
 from .logger_setup import get_folder_logger
 from .ocr_runner import OcrRunner
 from .output_manager import OutputManager
 from . import preprocessing
+from .segmentation import segment_file
 from .summary_writer import (
     FILE_FAILED,
     FILE_PROCESSED,
@@ -62,6 +64,8 @@ def _config_snapshot(config: AppConfig) -> dict:
         "pipeline": config.paddleocr.pipeline,
         "lang": config.paddleocr.lang,
         "ocr_version": config.paddleocr.ocr_version,
+        "enable_segmentation": config.enable_segmentation,
+        "document_rules_path": config.document_rules_path,
     }
 
 
@@ -70,6 +74,7 @@ def process_folder(
     config: AppConfig,
     ocr_runner: OcrRunner,
     converter: Optional[DocumentConverter] = None,
+    document_rules: Optional[DocumentRules] = None,
 ) -> FolderSummary:
     """Process one subfolder of ``inputs/checking`` end to end."""
     subfolder = Path(subfolder)
@@ -174,7 +179,18 @@ def process_folder(
 
     # 4) Process each work item with per-file failure isolation.
     for item in work:
-        _process_item(item, config, converter, output_mgr, subfolder, ocr_runner, summary, logger, convert_exts)
+        _process_item(
+            item,
+            config,
+            converter,
+            output_mgr,
+            subfolder,
+            ocr_runner,
+            summary,
+            logger,
+            convert_exts,
+            document_rules,
+        )
 
     # 5) Write the summary.
     summary.total_execution_seconds = time.perf_counter() - folder_start
@@ -205,6 +221,7 @@ def _process_item(
     summary: FolderSummary,
     logger,
     convert_exts: set,
+    document_rules: Optional[DocumentRules] = None,
 ) -> None:
     """Process a single work item, never raising to the caller."""
     started = datetime.now()
@@ -266,11 +283,30 @@ def _process_item(
         # 4c) Preprocessing hooks (v1: no-ops).
         ocr_input = preprocessing.preprocess_input(ocr_input, logger)
 
-        # 4d) Run OCR (native artifacts saved into output_dir).
-        ocr_runner.run(ocr_input, output_dir)
+        # 4d) Run OCR. Native artifacts are saved into the raw_<stem> subfolder
+        #     so they are never mixed with the pipeline-organized outputs.
+        raw_dir = output_mgr.raw_output_dir(output_dir)
+        record.raw_output_folder = str(raw_dir)
+        ocr_runner.run(ocr_input, raw_dir)
 
         record.status = FILE_PROCESSED
-        logger.info("Processed OK: %s -> %s", original_path, output_dir)
+        logger.info("Processed OK: %s -> %s", original_path, raw_dir)
+
+        # 4e) Post-OCR logical-document segmentation (Option B). Failures here
+        #     never flip OCR success to failed; they are logged and recorded.
+        if config.enable_segmentation and document_rules is not None:
+            seg = segment_file(
+                source_file=original_path,
+                output_dir=output_dir,
+                raw_dir=raw_dir,
+                rules=document_rules,
+                logger=logger,
+            )
+            record.segmentation_status = seg.status
+            record.segmentation_error = seg.error
+            record.documents_detected = seg.summary_documents()
+        elif not config.enable_segmentation:
+            record.segmentation_status = "skipped"
 
     except Exception as exc:  # noqa: BLE001 - isolate per-file failures
         tb = traceback.format_exc()
