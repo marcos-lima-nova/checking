@@ -66,6 +66,10 @@ def _config_snapshot(config: AppConfig) -> dict:
         "ocr_version": config.paddleocr.ocr_version,
         "enable_segmentation": config.enable_segmentation,
         "document_rules_path": config.document_rules_path,
+        "page_images_enabled": config.page_images.enabled,
+        "tesseract_enabled": config.tesseract.enabled,
+        "fusion_enabled": config.fusion.enabled,
+        "fusion_strategy": config.fusion.strategy,
     }
 
 
@@ -292,8 +296,11 @@ def _process_item(
         record.status = FILE_PROCESSED
         logger.info("Processed OK: %s -> %s", original_path, raw_dir)
 
-        # 4e) Post-OCR logical-document segmentation (Option B). Failures here
-        #     never flip OCR success to failed; they are logged and recorded.
+        # 4e) Post-OCR logical-document segmentation (Option B), including the
+        #     optional Tesseract fusion stage. Failures here never flip OCR
+        #     success to failed; they are logged and recorded. `ocr_input` is
+        #     the file actually fed to PaddleOCR (post office-doc conversion,
+        #     if any) and is used as the source for clean per-page renders.
         if config.enable_segmentation and document_rules is not None:
             seg = segment_file(
                 source_file=original_path,
@@ -301,10 +308,18 @@ def _process_item(
                 raw_dir=raw_dir,
                 rules=document_rules,
                 logger=logger,
+                ocr_input=ocr_input,
+                page_images_cfg=config.page_images,
+                tesseract_cfg=config.tesseract,
+                fusion_cfg=config.fusion,
             )
             record.segmentation_status = seg.status
             record.segmentation_error = seg.error
             record.documents_detected = seg.summary_documents()
+            record.tesseract_run = seg.tesseract_run
+            record.fusion_enabled = seg.fusion_attempted
+            record.fusion_folder = seg.fusion_folder
+            record.fusion_stats = seg.fusion_summary or {}
         elif not config.enable_segmentation:
             record.segmentation_status = "skipped"
 

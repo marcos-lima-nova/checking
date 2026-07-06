@@ -149,3 +149,7 @@ inputs/checking/**
 logs/**
 misc/**
 output/**
+
+
+#Kilo specific
+.kilo/**

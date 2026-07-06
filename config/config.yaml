@@ -72,4 +72,38 @@ paddleocr:
       - "header_image"
       - "footer_image"   # any additional PaddleOCR kwargs (model names/dirs/thresholds)
 
+# --- Clean per-page image rendering (crop source for the Tesseract stage) ---
+# NEVER a diagnostic/annotated PaddleOCR output; always page_images/page_XXX.png.
+page_images:
+  enabled: true
+  output_folder_name: "page_images"
+  render_dpi: 300                          # fallback only; pages render at the
+                                            # *_res.json width/height when known.
+  image_format: "png"
+  validate_against_paddle_json_size: true
+  allow_box_scaling: true
+  suspicious_panel_ratio: 2.5              # reject images >= json_width * ratio
+
+# --- Tesseract secondary OCR (per PaddleOCR box) ---
+tesseract:
+  enabled: true
+  executable_path: "tesseract"
+  language: "por+eng"
+  psm: 7
+  oem: 1
+  timeout_seconds_per_box: 10
+  save_box_crops: true
+  save_box_json: true
+  crop_padding_px: 0
+  allow_padding_for_debug: false
+
+# --- PaddleOCR x Tesseract per-box fusion ---
+fusion:
+  enabled: true
+  strategy: "select_highest_confidence_per_box"
+  tie_margin: 0.03
+  tie_breaker: "paddleocr"
+  keep_alternatives: true
+  mark_conflicts: true
+  conflict_text_similarity_max: 0.6
 

@@ -74,6 +74,65 @@ class PaddleOcrConfig:
 
 
 @dataclass
+class PageImagesConfig:
+    """Clean per-page image rendering (source of truth for box crops).
+
+    These images are the ONLY acceptable crop source for the Tesseract fusion
+    stage: never PaddleOCR's diagnostic/annotated outputs (``*_preprocessed_img.png``,
+    ``*_overall_ocr_res.png``, ``*_layout_det_res.png``,
+    ``*_layout_order_res.png``, ``*_region_det_res.png``,
+    ``*_table_cell_img.png``).
+    """
+
+    enabled: bool = True
+    output_folder_name: str = "page_images"
+    render_dpi: int = 300
+    image_format: str = "png"
+    # If True, validate rendered size against the *_res.json width/height and
+    # apply box scaling on mismatch (see page_image_validator.py).
+    validate_against_paddle_json_size: bool = True
+    allow_box_scaling: bool = True
+    # A base image whose width is >= json_width * this ratio is treated as a
+    # PaddleOCR diagnostic panel (e.g. the triple Original/Rotated/Unwarping
+    # preview) and rejected as a crop source.
+    suspicious_panel_ratio: float = 2.5
+
+
+@dataclass
+class TesseractConfig:
+    """Per-box Tesseract OCR parameters (secondary OCR analysis)."""
+
+    enabled: bool = True
+    executable_path: str = "tesseract"
+    language: str = "por+eng"
+    psm: int = 7
+    oem: int = 1
+    timeout_seconds_per_box: int = 10
+    save_box_crops: bool = True
+    save_box_json: bool = True
+    # Crop padding is 0 by default (exact crop). Only used if
+    # allow_padding_for_debug is also True.
+    crop_padding_px: int = 0
+    allow_padding_for_debug: bool = False
+
+
+@dataclass
+class FusionConfig:
+    """PaddleOCR x Tesseract per-box fusion parameters."""
+
+    enabled: bool = True
+    strategy: str = "select_highest_confidence_per_box"
+    tie_margin: float = 0.03
+    tie_breaker: str = "paddleocr"
+    keep_alternatives: bool = True
+    mark_conflicts: bool = True
+    # Text-similarity threshold (0..1, via difflib) below which two selected
+    # strings with close confidences are considered "too different" and the
+    # box is flagged conflict_needs_review.
+    conflict_text_similarity_max: float = 0.6
+
+
+@dataclass
 class AppConfig:
     """Top-level application configuration."""
 
@@ -115,6 +174,11 @@ class AppConfig:
 
     # --- PaddleOCR ---
     paddleocr: PaddleOcrConfig = field(default_factory=PaddleOcrConfig)
+
+    # --- PaddleOCR + Tesseract fusion stage ---
+    page_images: PageImagesConfig = field(default_factory=PageImagesConfig)
+    tesseract: TesseractConfig = field(default_factory=TesseractConfig)
+    fusion: FusionConfig = field(default_factory=FusionConfig)
 
     # Absolute project root; resolved at load time. Not written to YAML.
     project_root: str = field(default_factory=lambda: str(Path.cwd()))
@@ -226,6 +290,20 @@ class AppConfig:
 # ---------------------------------------------------------------------- #
 # Loading
 # ---------------------------------------------------------------------- #
+def _sub_dataclass_from_dict(data: dict, cls, section_name: str):
+    """Build a nested dataclass (page_images/tesseract/fusion) from a dict.
+
+    Unknown keys raise a clear :class:`ConfigError` (unlike ``paddleocr``, these
+    sections have no free-form ``extra`` escape hatch).
+    """
+    data = dict(data or {})
+    known = {f.name for f in fields(cls)}
+    unknown = [k for k in data if k not in known]
+    if unknown:
+        raise ConfigError(f"Unknown {section_name!r} configuration keys: {unknown}")
+    return cls(**data)
+
+
 def _from_dict(data: dict, project_root: Optional[str]) -> AppConfig:
     """Build an :class:`AppConfig` from a plain dict (typically parsed YAML)."""
     data = dict(data or {})
@@ -239,13 +317,32 @@ def _from_dict(data: dict, project_root: Optional[str]) -> AppConfig:
         paddle_kwargs.setdefault("extra", {}).update(unknown_paddle)
     paddle = PaddleOcrConfig(**paddle_kwargs)
 
+    page_images_data = data.pop("page_images", None) or {}
+    page_images = _sub_dataclass_from_dict(page_images_data, PageImagesConfig, "page_images")
+
+    tesseract_data = data.pop("tesseract", None) or {}
+    tesseract = _sub_dataclass_from_dict(tesseract_data, TesseractConfig, "tesseract")
+
+    fusion_data = data.pop("fusion", None) or {}
+    fusion = _sub_dataclass_from_dict(fusion_data, FusionConfig, "fusion")
+
     known = {f.name for f in fields(AppConfig)}
-    kwargs = {k: v for k, v in data.items() if k in known and k not in ("paddleocr", "project_root")}
+    kwargs = {
+        k: v
+        for k, v in data.items()
+        if k in known and k not in ("paddleocr", "page_images", "tesseract", "fusion", "project_root")
+    }
     unknown = [k for k in data if k not in known]
     if unknown:
         raise ConfigError(f"Unknown configuration keys: {unknown}")
 
-    cfg = AppConfig(paddleocr=paddle, **kwargs)
+    cfg = AppConfig(
+        paddleocr=paddle,
+        page_images=page_images,
+        tesseract=tesseract,
+        fusion=fusion,
+        **kwargs,
+    )
     if project_root:
         cfg.project_root = str(Path(project_root).resolve())
     return cfg

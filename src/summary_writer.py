@@ -51,6 +51,11 @@ class FileRecord:
     segmentation_status: Optional[str] = None  # ok | failed | skipped
     segmentation_error: Optional[str] = None
     documents_detected: List[dict] = field(default_factory=list)
+    # PaddleOCR x Tesseract per-box fusion stage.
+    tesseract_run: Optional[bool] = None
+    fusion_enabled: Optional[bool] = None
+    fusion_folder: Optional[str] = None
+    fusion_stats: dict = field(default_factory=dict)
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
     duration_seconds: float = 0.0

@@ -25,6 +25,16 @@ Post-OCR logical-document segmentation (Option B):
     segmentation                - post-OCR segmentation orchestrator
     utils.text_normalizer       - text normalization for matching
     utils.path_utils            - sanitized folder/file naming
+
+PaddleOCR + Tesseract per-box fusion stage:
+    page_image_renderer         - clean per-page image rendering (crop source)
+    page_image_validator        - validate/scale base image vs *_res.json size
+    tesseract_box_extractor     - read PaddleOCR boxes from *_res.json
+    box_cropper                 - crop exact boxes out of page_images/
+    tesseract_runner            - thin wrapper around the tesseract binary
+    tesseract_result_writer     - per-page overall_ocr_res_tesseract.json
+    ocr_fusion                  - PaddleOCR x Tesseract per-box fusion
+    fusion_summary_writer       - aggregate per-page fusion counters
 """
 
 __all__ = [
@@ -49,6 +59,14 @@ __all__ = [
     "manifest_writer",
     "segmentation",
     "utils",
+    "page_image_renderer",
+    "page_image_validator",
+    "tesseract_box_extractor",
+    "box_cropper",
+    "tesseract_runner",
+    "tesseract_result_writer",
+    "ocr_fusion",
+    "fusion_summary_writer",
 ]
 
 __version__ = "0.1.0"

@@ -4,12 +4,19 @@
 > resume immediately with full alignment. Reflects the actual on-disk state as of
 > **2026-07-06**. This is a briefing/context document, not an implementation plan.
 >
-> **What changed since 2026-07-03:** the **Option B post-OCR logical-document
-> segmentation** stage was implemented and validated (see §8). PaddleOCR now
-> saves native artifacts into a `raw_<stem>/` subfolder, and a new pipeline layer
-> classifies each page by YAML rules, groups pages into logical documents, copies
-> per-document artifacts, and emits ADK-oriented manifests (`source_manifest.json`,
-> per-document `llm_ready.json`). The reference plan is `plans/plan_opcao_B.md`.
+> **What changed since 2026-07-03:**
+> 1. The **Option B post-OCR logical-document segmentation** stage was
+>    implemented and validated (see §8). PaddleOCR now saves native artifacts
+>    into a `raw_<stem>/` subfolder, and a new pipeline layer classifies each
+>    page by YAML rules, groups pages into logical documents, copies per-document
+>    artifacts, and emits ADK-oriented manifests (`source_manifest.json`,
+>    per-document `llm_ready.json`). Reference: `plans/plan_opcao_B.md`.
+> 2. A **PaddleOCR + Tesseract per-box OCR fusion** stage was implemented and
+>    validated (see §9). Before the text index, each page is rendered to a clean
+>    `page_images/page_XXX.png`, PaddleOCR boxes are cropped from it, Tesseract
+>    OCRs each crop, and results are fused per box (highest confidence wins). The
+>    `page_text_indexer` now prefers the fused result. Reference:
+>    `.kilo/plans/1783345614893-paddleocr-tesseract-fusion.md`.
 
 ---
 
@@ -32,6 +39,12 @@ analysis** that:
 - Writes a per-folder log in `logs/` and a per-folder, ADK-friendly
   `processing_summary.json` in `output/<input_folder>/` (now including
   `documents_detected` per file).
+- **Fuses PaddleOCR with Tesseract per box (see §9):** each page is rendered to
+  a clean `page_images/page_XXX.png`, PaddleOCR boxes are cropped from it,
+  Tesseract OCRs each crop, and the two results are fused per box (the string
+  with the highest normalized confidence is selected; alternatives/conflicts are
+  preserved). Optional and config-gated; when Tesseract is unavailable the
+  pipeline falls back to PaddleOCR-only with zero regression.
 - **Segments each OCR'd file into logical documents (Option B):** a file may
   contain several logical documents across different pages; the pipeline
   classifies each page by rules loaded from `config/document_rules.yaml`, groups
@@ -39,7 +52,8 @@ analysis** that:
   `documents/<NNN_tipo>/`, and generates per-document `document_metadata.json` +
   `llm_ready.json` plus a per-file `source_manifest.json`.
 - Isolates per-file failures (full traceback logged + recorded), never aborting
-  the batch. Segmentation failures are isolated from OCR success too.
+  the batch. Segmentation and Tesseract-fusion failures are isolated from OCR
+  success too (per-page/per-box isolation for fusion).
 - Supports skip-existing (default) or overwrite, and selective execution of a
   single folder for fast testing.
 - Leaves clean extension points for future PDF/image preprocessing and for
@@ -50,13 +64,18 @@ analysis** that:
 
 ## 2. Current Progress
 
-**Status: v1 OCR pipeline + Option B segmentation are implemented and
-validated.** All modules exist and are byte-compilable. Real OCR runs have
-succeeded on GPU (v1). The Option B segmentation stage was validated end-to-end
-against real OCR artifacts (dry-run over an existing 2-page output) and with
-targeted unit checks (normalization, sanitization, artigo_299 phrase detection,
-continuation rule, A→B→A grouping). It has **not yet been run in a full
-GPU batch** on pending folders.
+**Status: v1 OCR pipeline + Option B segmentation + PaddleOCR/Tesseract fusion
+are implemented and validated.** All modules exist and are byte-compilable. Real
+OCR runs have succeeded on GPU (v1). The Option B segmentation stage was
+validated end-to-end against real OCR artifacts (dry-run over an existing 2-page
+output) and with targeted unit checks (normalization, sanitization, artigo_299
+phrase detection, continuation rule, A→B→A grouping). The Tesseract fusion stage
+was validated end-to-end offline over a real 1-page OCR output (69 boxes: 58
+selected from PaddleOCR, 11 from Tesseract, 0 conflicts), plus unit checks for
+the validator (direct/scaled/reject), the fusion rules (empty/tie/conflict), and
+the no-Tesseract fallback. Tesseract 5.3.4 (`por`+`eng`) is present on this
+machine. Neither stage has **yet been run in a full GPU batch** on pending
+folders.
 
 ### v1 OCR — folders processed successfully (all `status: completed`, 0 failures)
 | Folder | Files | Notes (source types exercised) |
@@ -93,8 +112,9 @@ A fresh run on any pending folder will use the new `raw_` + segmentation layout.
 `logs/PI_293267_03072026.log`, `logs/_run_03072026.log` (bootstrap logger).
 
 ### Version control
-The repo is now a git repository (was not in the 2026-07-03 briefing). Segmentation
-modules and config are currently uncommitted/untracked working-tree changes.
+The repo is now a git repository (was not in the 2026-07-03 briefing). The
+segmentation and Tesseract-fusion modules plus config changes are currently
+uncommitted/untracked working-tree changes.
 
 ---
 
@@ -105,8 +125,13 @@ modules and config are currently uncommitted/untracked working-tree changes.
   (`/home/vini/miniconda3/envs/paddleocr/bin/python3`).
 - **paddleocr `3.7.0`**, **paddlex `3.7.2`**, **paddlepaddle-gpu `3.3.0`**.
 - **PyYAML** for config.
+- **Tesseract fusion deps (pip):** `PyMuPDF` (fitz, PDF→image render),
+  `pytesseract`, `opencv-python`, `Pillow`, `numpy` — all present in the env.
 - **LibreOffice** present at `/usr/bin/soffice` and `/usr/bin/libreoffice`
   (system dependency for document conversion; not a pip package).
+- **Tesseract OCR** `5.3.4` at `/usr/bin/tesseract`, languages `por`+`eng`
+  (system dependency for the fusion stage; not a pip package). If missing, the
+  fusion stage is skipped and the pipeline falls back to PaddleOCR-only.
 - OCR pipeline in use: **`PPStructureV3`** (layout analysis). `PaddleOCRVL`
   supported as an alternative via config.
 
@@ -134,15 +159,18 @@ PaddleOCR/
 │  ├─ extracted/<folder>/<zip_stem>/   # controlled zip extraction (PI 289211 present)
 │  ├─ converted/<folder>/<file_stem>/  # doc/docx/odt -> pdf (PI 293267 present)
 │  ├─ GPT_CHECKING-...zip / GPT_CHECKING-.../  # pre-existing manual artifacts (not ours)
-├─ output/<folder>/                 # processing_summary.json (now incl. documents_detected)
+├─ output/<folder>/                 # processing_summary.json (now incl. documents_detected + fusion stats)
 │  └─ <file_stem>/                  # per-file output dir
 │     ├─ raw_<file_stem>/           # NATIVE OCR artifacts (PaddleOCR save_all target)
+│     ├─ page_images/page_XXX.png   # clean per-page render (Tesseract crop source; see §9)
+│     ├─ tesseract/page_XXX/        # per-box crops + box_XXX.json + overall_ocr_res_tesseract.json
+│     ├─ fusion/page_XXX_overall_ocr_res_fused.json  # PaddleOCR x Tesseract per-box fusion
 │     ├─ documents/<NNN_tipo>/      # logical documents: pages/page_NNN/ + metadata + llm_ready
-│     ├─ page_inventory.json        # raw artifacts grouped per page
-│     ├─ page_text_index.json       # per-page text + normalized text + low-confidence lines
+│     ├─ page_inventory.json        # raw artifacts grouped per page (+ fused_json/tesseract_json)
+│     ├─ page_text_index.json       # per-page text (+ source + fusion_status per line)
 │     ├─ page_classification.json   # per-page rule classification
 │     ├─ document_groups.json       # page -> logical-document grouping
-│     └─ source_manifest.json       # PRIMARY ADK entry point for this file
+│     └─ source_manifest.json       # PRIMARY ADK entry point (+ ocr_sources/artifacts/fusion_summary)
 ├─ output_pdf/PI283055/             # OLD manual experiment — leave untouched, not part of spec
 ├─ logs/<folder>_<DDMMYYYY>.log     # one per analyzed folder + _run bootstrap log
 ├─ config/
@@ -161,7 +189,10 @@ PaddleOCR/
 │  ├─ page_inventory.py  page_text_indexer.py  page_classifier.py   # NEW: segmentation stages
 │  ├─ document_segmenter.py            document_artifact_organizer.py # NEW
 │  ├─ llm_ready_writer.py              manifest_writer.py             # NEW
-│  ├─ segmentation.py                  # NEW: post-OCR segmentation orchestrator
+│  ├─ segmentation.py                  # NEW: post-OCR segmentation + fusion orchestrator
+│  ├─ page_image_renderer.py  page_image_validator.py               # NEW: fusion stage (§9)
+│  ├─ tesseract_box_extractor.py  box_cropper.py  tesseract_runner.py # NEW: fusion stage
+│  ├─ tesseract_result_writer.py  ocr_fusion.py  fusion_summary_writer.py # NEW: fusion stage
 │  └─ utils/
 │     ├─ __init__.py  text_normalizer.py  path_utils.py              # NEW
 ├─ main.py               requirements.txt  README.md
@@ -175,7 +206,10 @@ PaddleOCR/
   helpers; `resolved_device()`; skip/overwrite mutual-exclusion check. **New:**
   `enable_segmentation` (default `True`) and `document_rules_path` (default
   `config/document_rules.yaml`) with `document_rules_path_resolved`; `validate()`
-  now checks the rules file exists when segmentation is enabled.
+  now checks the rules file exists when segmentation is enabled. **Fusion:** new
+  nested dataclasses `PageImagesConfig`, `TesseractConfig`, `FusionConfig` (each
+  parsed from its own YAML section via `_sub_dataclass_from_dict`, which rejects
+  unknown keys).
 - **`logger_setup.py`** — `get_folder_logger()`; file `logs/<folder>_<DDMMYYYY>.log`
   (+ optional console); sanitizes folder names; exposes `logger.log_file_path`.
 - **`file_scanner.py`** — `list_target_subfolders()` (selective/all + missing-target
@@ -197,15 +231,19 @@ PaddleOCR/
 - **`summary_writer.py`** — `FileRecord` + `FolderSummary`; computes totals and
   folder status (`completed` / `completed_with_errors` / `failed`); writes JSON.
   **New `FileRecord` fields:** `raw_output_folder`, `segmentation_status`
-  (`ok`/`failed`/`skipped`), `segmentation_error`, and `documents_detected` (list).
+  (`ok`/`failed`/`skipped`), `segmentation_error`, `documents_detected` (list),
+  plus fusion fields `tesseract_run`, `fusion_enabled`, `fusion_folder`,
+  `fusion_stats` (per-file aggregate counters).
 - **`preprocessing.py`** — no-op hooks (`preprocess_input`, `pdf_to_images`,
   `deskew`, `binarize`, `enhance_contrast`, `denoise`, `resize`, `select_pages`).
 - **`pipeline.py`** — `process_folder(..., document_rules=None)` orchestrates
   scan → zip → per-item (convert → resolve output → skip/overwrite → preprocess →
-  **OCR into `raw_<stem>/`** → **segmentation**) with per-file `try/except`
-  (traceback logged + recorded), then writes summary. Segmentation runs via
-  `segment_file(...)` and its result (status/error/`documents_detected`) is
-  attached to the `FileRecord`; a segmentation failure does not flip OCR success.
+  **OCR into `raw_<stem>/`** → **segmentation (incl. Tesseract fusion)**) with
+  per-file `try/except` (traceback logged + recorded), then writes summary.
+  `segment_file(...)` receives `ocr_input` (the file actually fed to PaddleOCR,
+  post office-doc conversion) and the `page_images`/`tesseract`/`fusion` configs;
+  its result (status/error/`documents_detected` + fusion stats) is attached to
+  the `FileRecord`. Segmentation/fusion failures never flip OCR success.
 - **`main.py`** — argparse (`--config`, `--target-folder`, `--process-all`,
   `--device`, `--overwrite`, `--skip-existing`, `--log-level`), builds one shared
   `OcrRunner`, **loads `document_rules` once** (when segmentation enabled) and
@@ -224,9 +262,13 @@ PaddleOCR/
 - **`page_inventory.py`** — `build_inventory()` scans `raw_<stem>/`, finds
   `*_res.json`, resolves each `page_index` (JSON field → filename `_N_` pattern →
   `unknown_page_index` + log), associates sibling artifacts → `page_inventory.json`.
-- **`page_text_indexer.py`** — `build_text_index()` reads `overall_ocr_res`
-  (`rec_texts`/`rec_scores`/`rec_boxes`), builds `raw_text_lines`,
-  `normalized_text`, `low_confidence_lines` → `page_text_index.json`.
+- **`page_text_indexer.py`** — `build_text_index()` builds `raw_text_lines`,
+  `normalized_text`, `low_confidence_lines` → `page_text_index.json`. **Now
+  source-aware:** picks the best available source per page in priority order
+  (1) fused JSON, (2) PaddleOCR `overall_ocr_res`, (3) Tesseract result,
+  (4) `parsing_res_list`, (5) `table_res_list[].pred_html`, (6) markdown. Each
+  line carries `source` and `fusion_status`. Defaults to PaddleOCR when no
+  fusion is present (unchanged v1 behavior).
 - **`page_classifier.py`** — `classify_pages()` scores each page against the
   rules (strong/weak term weights → `confidence = points/max_points`), applies
   thresholds (`classified`/`needs_review`/`unknown`) → `page_classification.json`.
@@ -241,10 +283,44 @@ PaddleOCR/
   `document_metadata.json` and `llm_ready.json` (text lines, artifact refs
   relative to the doc folder, `instructions_for_llm`, matched terms).
 - **`manifest_writer.py`** — `write_source_manifest()` writes the per-file
-  `source_manifest.json` (the primary ADK entry point).
-- **`segmentation.py`** — `segment_file()` orchestrates inventory → text index →
-  classify → segment → organize → metadata/llm_ready → manifest; fully defensive
-  (never raises to the caller); returns a `SegmentationResult`.
+  `source_manifest.json` (the primary ADK entry point). **New optional kwargs:**
+  `ocr_sources` (primary/secondary/fusion_enabled/fusion_strategy), `artifacts`
+  (raw/page_images/tesseract/fusion folders), and `fusion_summary`.
+- **`segmentation.py`** — `segment_file()` orchestrates inventory →
+  **[Tesseract fusion]** → text index → classify → segment → organize →
+  metadata/llm_ready → manifest; fully defensive (never raises to the caller);
+  returns a `SegmentationResult` (now including fusion flags/folders/summary).
+  The fusion stage (`_run_fusion_stage`) runs after `build_inventory` and before
+  `build_text_index`, annotating each inventory page with `fused_json` /
+  `tesseract_json`; it is skipped entirely when disabled/unavailable.
+
+### New Tesseract-fusion modules (see §9)
+- **`page_image_renderer.py`** — `render_pages()` renders clean
+  `page_images/page_XXX.png` from the file actually fed to OCR (`ocr_input`,
+  fallback: `_res.json` `input_path`); PDFs render at the exact `_res.json`
+  width/height when known (via PyMuPDF); images normalized as `page_000`. Never
+  reads PaddleOCR diagnostic/annotated artifacts. Per-page failure isolation.
+- **`page_image_validator.py`** — `validate_base_image()` returns
+  `direct`/`scaled`/`reject`; rejects likely diagnostic panels
+  (`img_w >= json_w * suspicious_panel_ratio`, default 2.5) with a clear message.
+- **`tesseract_box_extractor.py`** — `extract_boxes()` reads PaddleOCR
+  `overall_ocr_res.{rec_texts,rec_scores,rec_boxes,rec_polys}`, preserving
+  `box_index` and page dimensions.
+- **`box_cropper.py`** — `crop_boxes()` crops each `rec_box` from the clean page
+  image (padding 0 by default; only >0 with `allow_padding_for_debug`), applies
+  scale when `mode=="scaled"`, clamps to bounds; saves `tesseract/page_XXX/box_XXX.png`.
+- **`tesseract_runner.py`** — thin `pytesseract` wrapper; `is_available()`
+  (cached) and `ocr_crop()` (normalizes confidence 0-100 → 0.0-1.0; `-1`/invalid
+  → 0.0; never raises).
+- **`tesseract_result_writer.py`** — `process_page()` ties extractor → cropper →
+  runner and writes `overall_ocr_res_tesseract.json` (preserving PaddleOCR
+  boxes/polys) plus optional per-box `box_XXX.json`.
+- **`ocr_fusion.py`** — `fuse_page()` selects the higher-confidence string per
+  box (rules: no empty; empty→other; tie<`tie_margin`→`tie_breaker`; divergent
+  text + close confidence → `conflict_needs_review`); keeps alternatives in
+  `fusion_items`; writes `fusion/page_XXX_overall_ocr_res_fused.json`.
+- **`fusion_summary_writer.py`** — `aggregate_fusion_summary()` sums per-page
+  counters (total/selected_from_*/conflicts/empty_*/pages_processed/failed).
 
 ---
 
@@ -300,24 +376,54 @@ PaddleOCR/
 20. **Failure isolation extended to segmentation:** a segmentation failure is
     logged + recorded (`segmentation_status=failed`) without failing OCR or the batch.
 
+### PaddleOCR + Tesseract fusion decisions (2026-07-06)
+21. **Render source = the file actually fed to OCR (`ocr_input`):** the converted
+    PDF for office docs, or the original image/PDF; fallback to the `_res.json`
+    `input_path`. Never a PaddleOCR diagnostic/annotated artifact.
+22. **Clean per-page image is the ONLY crop source** (`page_images/page_XXX.png`).
+    Explicitly forbidden as crop sources: `*_preprocessed_img.png` (triple
+    panel), `*_overall_ocr_res.png`, `*_layout_det_res.png`,
+    `*_layout_order_res.png`, `*_region_det_res.png`, `*_table_cell_img.png`.
+23. **Render to the exact `_res.json` width/height** when known (no box scaling
+    needed); `render_dpi` is only a fallback. Size mismatch → scale boxes;
+    suspicious panel (`img_w >= json_w * 2.5`) → reject that page's crops.
+24. **Fusion orchestrated inside `segment_file`**, after inventory and before the
+    text index; per-page and per-box failure isolation; a global try/except
+    guards the whole stage.
+25. **Fusion selection = highest normalized confidence per box**; empties never
+    win; ties within `tie_margin` go to `tie_breaker` (default `paddleocr`);
+    divergent text with close confidence is flagged `conflict_needs_review` but a
+    string is still chosen. `rec_texts` holds only the selected string;
+    alternatives + metadata live in `fusion_items`. Box geometry always comes
+    from PaddleOCR (Tesseract OCRs those exact regions).
+26. **No-Tesseract / disabled fallback = PaddleOCR-only, zero regression:** no
+    `page_images/`, `tesseract/`, or `fusion/` folders are created; the text
+    index uses PaddleOCR; `source_manifest.json` records `fusion_enabled=false`.
+27. **`page_text_indexer` prefers the fused result** as its primary source (see
+    the 6-level priority in §9), tagging each line with `source`/`fusion_status`.
+
 ---
 
 ## 6. Pending Tasks / Next Steps
 
-- **Run a full GPU batch with segmentation enabled.** The segmentation stage has
-  been validated by dry-run + unit checks only; it has not yet run through a live
-  GPU OCR + segmentation batch. Process the pending folders (`PI 289211 - TV
-  CARTOON NETWORK`, `PI 292174`, `PI 292850 - RÁDIO VERTSUL FM 93,5`, `PI 294215 -
-  TV REDE ESTAÇÃO`, `PI 294225 - TV MILL`, `PI 295870 - CATURITÉ AM`) via a full
-  run (`--process-all` / `config.yaml`) and inspect the generated manifests.
+- **Run a full GPU batch with segmentation + fusion enabled.** Both stages have
+  been validated by dry-run + unit checks only; they have not yet run through a
+  live GPU OCR + segmentation + Tesseract-fusion batch. Process the pending
+  folders (`PI 289211 - TV CARTOON NETWORK`, `PI 292174`, `PI 292850 - RÁDIO
+  VERTSUL FM 93,5`, `PI 294215 - TV REDE ESTAÇÃO`, `PI 294225 - TV MILL`,
+  `PI 295870 - CATURITÉ AM`) via a full run (`--process-all` / `config.yaml`) and
+  inspect the generated manifests, `page_images/`, `tesseract/`, and `fusion/`.
+- **Tune the fusion parameters** (`tie_margin`, `tie_breaker`, `psm`/`oem`,
+  `language`, `conflict_text_similarity_max`) against real multi-document files;
+  check the `fusion_summary` counters and per-box conflicts.
 - **Re-run already-processed folders with `--overwrite`** to migrate their OLD
   flat outputs to the new `raw_` + `documents/` + manifest layout (they are not
   retro-segmented automatically).
 - **Tune `config/document_rules.yaml`** using real outputs and the `examples/`
   reference dirs; the v1 scoring is intentionally simple/explainable and expected
   to need threshold/term tuning per document type.
-- **Commit the segmentation work.** New/modified files are currently uncommitted
-  working-tree changes (repo is now under git).
+- **Commit the segmentation + fusion work.** New/modified files are currently
+  uncommitted working-tree changes (repo is now under git).
 - **Investigate potential duplicate/confusing input state:** `inputs/checking/`
   contains both `PI 289211` and `PI 289211 - TV CARTOON NETWORK`. The processed
   `PI 289211` was fed from a zip; confirm whether these are duplicates or distinct
@@ -349,6 +455,10 @@ PaddleOCR/
   pipeline output contract.
 - **LibreOffice must be on PATH** for `.doc/.docx/.odt`; if absent, those files
   fail per-file (recorded) without aborting the batch.
+- **Tesseract must be on PATH** for the fusion stage (`tesseract` binary +
+  `por`/`eng` language packs). If absent (or `tesseract.enabled`/`fusion.enabled`
+  is false), the fusion stage is skipped and the pipeline uses PaddleOCR-only —
+  no batch failure, no fusion artifacts.
 - **First OCR run downloads models** (adds minutes); subsequent runs are fast
   (observed: ~1.3–3s per typical page; a 154s file was a large multi-page PDF).
 - **Do not blindly assume PaddleOCR API signatures** if the installed version
@@ -360,6 +470,11 @@ PaddleOCR/
 - **Segmentation is config-gated:** `enable_segmentation` (default `true`) and
   `document_rules_path` in the YAML config. If the rules file is missing while
   segmentation is enabled, `config.validate()` fails fast with a `ConfigError`.
+- **Fusion is config-gated** via three YAML sections: `page_images`, `tesseract`,
+  `fusion` (all `enabled: true` by default). Fusion runs only when all three are
+  enabled AND the Tesseract binary is available; otherwise it is skipped
+  silently (logged) with PaddleOCR-only fallback. Unknown keys in these sections
+  raise a `ConfigError`.
 - **Generated folder/file names are sanitized** (`NF 321` → `NF_321`, `raw_NF_321`;
   document-type folders lower-cased, e.g. `001_nota_fiscal`). Input-folder names
   on disk keep their spaces/accents as before (only the file stem is sanitized).
@@ -379,11 +494,18 @@ python main.py --target-folder "PI 293267" --device cpu --overwrite
 - OCR isolation: `src/ocr_runner.py:OcrRunner.run()` (`save_all`)
 - Summary schema: `src/summary_writer.py` (`FolderSummary.to_dict()`,
   `FileRecord` now includes `documents_detected` / `raw_output_folder`)
-- Segmentation orchestrator: `src/segmentation.py:segment_file()`
+- Segmentation + fusion orchestrator: `src/segmentation.py:segment_file()` and
+  `_run_fusion_stage()`
 - Rules loader/model: `src/document_rules.py:load_document_rules()`
 - Rules config: `config/document_rules.yaml`
+- Fusion entry points: `src/ocr_fusion.py:fuse_page()`,
+  `src/page_image_renderer.py:render_pages()`,
+  `src/tesseract_result_writer.py:process_page()`
+- Fusion config sections: `config/config.yaml` → `page_images` / `tesseract` /
+  `fusion`
 - Original v1 implementation plan: `plans/ocr-pipeline-v1.md`
 - Option B segmentation plan: `plans/plan_opcao_B.md`
+- Tesseract fusion plan: `.kilo/plans/1783345614893-paddleocr-tesseract-fusion.md`
 
 ---
 
@@ -453,3 +575,115 @@ output/<folder>/<file_stem>/
 - `examples/` dirs are placeholders (README only) pending real samples.
 - Existing pre-Option-B outputs remain in the old flat layout until re-run with
   `--overwrite`.
+
+---
+
+## 9. PaddleOCR + Tesseract Per-Box OCR Fusion
+
+**Goal:** improve OCR quality by cross-checking every PaddleOCR box against a
+Tesseract pass on the same region, then keeping, per box, whichever string has
+the higher confidence. Reference plan:
+`.kilo/plans/1783345614893-paddleocr-tesseract-fusion.md`.
+
+### Data flow (per file, between inventory and text index)
+```
+raw_<stem>/*_res.json (PaddleOCR boxes)
+  → page_image_renderer  → page_images/page_XXX.png     (clean render from ocr_input)
+  → page_image_validator → direct | scaled | reject     (vs *_res.json width/height)
+  → tesseract_box_extractor → PaddleOCR boxes (index-preserving)
+  → box_cropper          → tesseract/page_XXX/box_XXX.png (exact crops)
+  → tesseract_runner     → per-box text + confidence (0..1)
+  → tesseract_result_writer → tesseract/page_XXX/overall_ocr_res_tesseract.json
+  → ocr_fusion           → fusion/page_XXX_overall_ocr_res_fused.json
+  → (inventory annotated with fused_json/tesseract_json; page_text_indexer prefers fused)
+```
+
+### `page_text_indexer` source priority (per page)
+1. `fusion/page_XXX_overall_ocr_res_fused.json` (fused)
+2. PaddleOCR `overall_ocr_res` (from `*_res.json`) — default when no fusion
+3. Tesseract `overall_ocr_res_tesseract.json`
+4. `parsing_res_list` (from `*_res.json`)
+5. `table_res_list[].pred_html`
+6. the page's markdown file
+
+Each emitted line carries `source`
+(`fused`/`paddleocr`/`tesseract`/`parsing`/`table`/`markdown`) and
+`fusion_status` (`selected`/`conflict_needs_review`/`both_empty`/`null`).
+
+### Config (defaults; `config/config.yaml` + `config/test_config.yaml`)
+```yaml
+page_images:
+  enabled: true
+  output_folder_name: "page_images"
+  render_dpi: 300                      # fallback; render targets *_res.json size
+  image_format: "png"
+  validate_against_paddle_json_size: true
+  allow_box_scaling: true
+  suspicious_panel_ratio: 2.5          # reject base images wider than json_w * ratio
+tesseract:
+  enabled: true
+  executable_path: "tesseract"
+  language: "por+eng"
+  psm: 7
+  oem: 1
+  timeout_seconds_per_box: 10
+  save_box_crops: true
+  save_box_json: true
+  crop_padding_px: 0                    # exact crop by default
+  allow_padding_for_debug: false
+fusion:
+  enabled: true
+  strategy: "select_highest_confidence_per_box"
+  tie_margin: 0.03
+  tie_breaker: "paddleocr"
+  keep_alternatives: true
+  mark_conflicts: true
+  conflict_text_similarity_max: 0.6
+```
+
+### Fusion selection rules (`ocr_fusion._choose`)
+1. Never select an empty string when the other source has text.
+2. If one source is empty, select the other.
+3. Otherwise select the higher normalized confidence.
+4. If the confidence gap `< tie_margin`, select `tie_breaker` (default PaddleOCR).
+5. If selected texts are dissimilar (`similarity <= conflict_text_similarity_max`,
+   via `difflib`) while confidences are close, flag `conflict_needs_review` — a
+   string is still chosen.
+6. Alternatives (both sources' text/confidence) are preserved in `fusion_items`.
+
+### Key JSON shapes
+- `overall_ocr_res_tesseract.json`: `input_source="tesseract_box_ocr"`,
+  `based_on{paddle_res_json,image_source}`, `rec_texts/rec_scores/rec_boxes/rec_polys`
+  (boxes/polys copied from PaddleOCR), `box_results[{box_index,text,confidence,
+  status,crop_path}]`.
+- `..._fused.json`: `input_source="paddleocr_tesseract_fusion"`,
+  `fusion_strategy`, `sources{paddleocr,tesseract}`, `rec_texts` (selected only),
+  `rec_scores/rec_boxes/rec_polys`, `selected_sources[]`, `fusion_items[{box_index,
+  bbox,selected_source,selected_text,selected_confidence,status,paddleocr{...},
+  tesseract{...}}]`.
+- `source_manifest.json` gains `ocr_sources`, `artifacts`, `fusion_summary`.
+- `processing_summary.json` `FileRecord` gains `tesseract_run`, `fusion_enabled`,
+  `fusion_folder`, `fusion_stats`.
+
+### Validation performed (no full GPU batch yet)
+- `python -m py_compile` on all new/changed modules + `main.py`: OK.
+- End-to-end offline `segment_file()` over a real 1-page OCR output (RPS, 69
+  boxes): clean render matched `_res.json` size exactly (1191x1685, `direct`
+  mode, no scaling); Tesseract OCR'd all 69 boxes; fusion selected 58 from
+  PaddleOCR + 11 from Tesseract, 0 conflicts; `page_text_index.json` used the
+  fused source; `source_manifest.json` carried `ocr_sources`/`artifacts`/
+  `fusion_summary`; `page_inventory.json` persisted `fused_json`/`tesseract_json`.
+- Unit checks: validator (direct / scaled / reject-with-exact-message /
+  scaling-disabled), fusion rules (empty→other, tie→tie_breaker, out-of-tie→max
+  confidence, divergent+close→`conflict_needs_review`, both-empty safe).
+- No-Tesseract fallback: pointing `executable_path` at a missing binary skipped
+  the stage cleanly — no `page_images/`/`tesseract/`/`fusion/` created,
+  `fusion_enabled=false`, text index = PaddleOCR only.
+
+### Known limitations / follow-ups
+- Not yet run in a live GPU batch; fusion parameters (`tie_margin`, `psm`/`oem`,
+  `language`, `conflict_text_similarity_max`) are untuned against real data.
+- Sequential (no per-box/page parallelism); Tesseract-per-box adds wall time on
+  pages with many boxes.
+- Single-image sources (PNG/JPG) render as `page_000` and are treated as a
+  `direct` match (no `_res.json` size to validate against).

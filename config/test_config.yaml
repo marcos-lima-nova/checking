@@ -37,3 +37,33 @@ accepted_extensions:
 
 paddleocr:
   pipeline: "PPStructureV3"
+
+page_images:
+  enabled: true
+  output_folder_name: "page_images"
+  render_dpi: 300
+  image_format: "png"
+  validate_against_paddle_json_size: true
+  allow_box_scaling: true
+  suspicious_panel_ratio: 2.5
+
+tesseract:
+  enabled: true
+  executable_path: "tesseract"
+  language: "por+eng"
+  psm: 7
+  oem: 1
+  timeout_seconds_per_box: 10
+  save_box_crops: true
+  save_box_json: true
+  crop_padding_px: 0
+  allow_padding_for_debug: false
+
+fusion:
+  enabled: true
+  strategy: "select_highest_confidence_per_box"
+  tie_margin: 0.03
+  tie_breaker: "paddleocr"
+  keep_alternatives: true
+  mark_conflicts: true
+  conflict_text_similarity_max: 0.6

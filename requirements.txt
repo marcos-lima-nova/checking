@@ -12,8 +12,27 @@ paddlepaddle-gpu==3.3.0
 PyYAML>=6.0
 
 # ---------------------------------------------------------------------------
-# System dependency (NOT installable via pip):
+# PaddleOCR + Tesseract fusion stage dependencies.
+#   - PyMuPDF (fitz): render clean per-page images from the file fed to OCR.
+#   - pytesseract: Python wrapper around the `tesseract` binary.
+#   - opencv-python: box cropping / image handling.
+#   - Pillow: image I/O helper used alongside OpenCV.
+#   - numpy: array handling for crops.
+# ---------------------------------------------------------------------------
+PyMuPDF>=1.24
+pytesseract>=0.3.10
+opencv-python>=4.9
+Pillow>=10.0
+numpy>=1.26
+
+# ---------------------------------------------------------------------------
+# System dependencies (NOT installable via pip):
 #   LibreOffice (provides `soffice`) is required to convert
 #   .doc / .docx / .odt to PDF before OCR.
 #     Debian/Ubuntu/Pop!_OS:  sudo apt install libreoffice
+#
+#   Tesseract OCR binary is required for the fusion stage (per-box OCR).
+#     Debian/Ubuntu/Pop!_OS:  sudo apt install tesseract-ocr tesseract-ocr-por
+#   If the binary/language packs are missing, the fusion stage is skipped and
+#   the pipeline falls back to PaddleOCR results only (no batch failure).
 # ---------------------------------------------------------------------------
